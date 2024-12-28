@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>色と矢印キーのゲーム</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: sans-serif;
+      background: linear-gradient(135deg, #ffe9e3, #fce9ff);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+    }
+    h1 {
+      margin-top: 20px;
+      color: #333;
+    }
+    #instruction {
+      margin-top: 10px;
+      font-size: 1rem;
+      color: #333;
+      text-align: center;
+      line-height: 1.4em;
+    }
+    #task-area {
+      position: relative;
+      width: 800px; 
+      height: 300px;
+      margin-top: 30px;
+      background: #fff;
+      border: 2px solid #333;
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* 丸(刺激)のスタイル */
+    .stimulus {
+      position: absolute;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.5rem;
+      color: #333;
+    }
+    #info {
+      margin-top: 20px;
+      min-height: 2em;
+      color: #333;
+      text-align: center;
+    }
+    button {
+      padding: 10px 20px;
+      margin-top: 20px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      background: #3498db;
+      color: #fff;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #2980b9;
+    }
+  </style>
+</head>
+<body>
+  <h1>色＆矢印キー ゲーム</h1>
+  <div id="instruction">
+    <p>◆ 丸が「青」のときは <strong>→キー</strong> を押してください</p>
+    <p>◆ 丸が「赤」のときは <strong>←キー</strong> を押してください</p>
+    <p>※ 丸の <strong>位置（左/中央/右）</strong> と<br/>
+    丸の中の <strong>矢印（←/→）</strong> はダミー表示です</p>
+  </div>
+
+  <div id="task-area"></div>
+  <div id="info"></div>
+  <button id="start-btn">開始</button>
+
+  <!-- 正解音 (base64埋込の短いビープ音) -->
+  <audio id="correct-sound" preload="auto">
+    <source src="data:audio/wav;base64,UklGRlYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YYe/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAgICAQEBAQEBBQUFBQUGBgYHCAgICAkJCQoKCgsLCwwMDQ0ODg4PDw8QEBAREBESEhISExMTFBQUFRUVFhYWGBgYGRkZGhocHBwdHx8fICAgISEhIiIiIyMjJCQkJSUlJiYmKCgoKSkpKysrLCwsLS0tLi4uLy8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" type="audio/wav">
+  </audio>
+  <!-- 不正解音 (base64埋込の短いビープ音; 別の音) -->
+  <audio id="incorrect-sound" preload="auto">
+    <source src="data:audio/wav;base64,UklGRmgAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YYe/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAQEBAgICAQICAwMDAwQEBAUGBgYHCAgICQkJCgoKCwsMDAwNDQ0ODg4PDw8QEBEQERERExMTFBQUFRUVFhYXGBgYGRkZGhocHBwdHx8gISEhIiIiIyMjJCQkJSUlJiYmKioqKysrLCwtLS0tLi4uLy8vPz8/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" type="audio/wav">
+  </audio>
+
+  <script>
+    /***************************************************************
+     * 1. 定数・変数の定義
+     ***************************************************************/
+    const taskArea = document.getElementById('task-area');
+    const infoArea = document.getElementById('info');
+    const startBtn = document.getElementById('start-btn');
+    const correctSound = document.getElementById('correct-sound');
+    const incorrectSound = document.getElementById('incorrect-sound');
+
+    // 試行数
+    const TRIAL_COUNT = 10;
+
+    // 3つの表示位置 (相対的にleft座標をセットする)
+    const POSITION_X = {
+      left: 100,   // 左側
+      center: 350, // 中央
+      right: 600   // 右側
+    };
+    const TOP_POS = 100; // Y座標（高さ）固定
+
+    // 各試行の情報を格納: [{ color, arrow, position }, ...]
+    let trials = [];
+    // 現在の試行番号
+    let currentTrialIndex = 0;
+    // 試行中フラグ
+    let inProgress = false;
+    // 反応時間計測
+    let startTime = 0;
+    // 結果格納用
+    let results = [];
+
+    /***************************************************************
+     * 2. イベント: 開始ボタン
+     ***************************************************************/
+    startBtn.addEventListener('click', startGame);
+
+    function startGame() {
+      startBtn.disabled = true;
+      infoArea.textContent = '';
+
+      createTrials();
+      currentTrialIndex = 0;
+      results = [];
+
+      runNextTrial();
+    }
+
+    /***************************************************************
+     * 3. 試行リストの作成
+     ***************************************************************/
+    function createTrials() {
+      trials = [];
+      for (let i = 0; i < TRIAL_COUNT; i++) {
+        // 色: 青 or 赤
+        const color = Math.random() < 0.5 ? 'blue' : 'red';
+        // 中の矢印: ← or →
+        const arrowInside = Math.random() < 0.5 ? '←' : '→';
+        // 位置: left / center / right (3つのうちランダム)
+        const posArray = ['left', 'center', 'right'];
+        const randomPos = posArray[Math.floor(Math.random() * posArray.length)];
+
+        trials.push({
+          color: color,
+          arrow: arrowInside,
+          position: randomPos
+        });
+      }
+    }
+
+    /***************************************************************
+     * 4. 次の試行を実行
+     ***************************************************************/
+    function runNextTrial() {
+      if (currentTrialIndex >= TRIAL_COUNT) {
+        endTask();
+        return;
+      }
+      inProgress = true;
+      taskArea.innerHTML = '';
+
+      const trial = trials[currentTrialIndex];
+      showStimulus(trial);
+      startTime = performance.now();
+    }
+
+    function showStimulus(trial) {
+      // 刺激(div)を作る
+      const stimDiv = document.createElement('div');
+      stimDiv.classList.add('stimulus');
+      // 色に応じて背景色を設定
+      stimDiv.style.backgroundColor = (trial.color === 'blue') ? '#3498db' : '#e74c3c';
+      // 中の矢印（←/→）
+      stimDiv.textContent = trial.arrow;
+
+      // 位置設定
+      const xPos = POSITION_X[trial.position]; // left/center/rightに応じたx座標
+      stimDiv.style.left = xPos + 'px';
+      stimDiv.style.top = TOP_POS + 'px';
+
+      taskArea.appendChild(stimDiv);
+    }
+
+    /***************************************************************
+     * 5. キー押下の処理
+     ***************************************************************/
+    // ルール: 
+    //   青(circle) => →キー(39)
+    //   赤(circle) => ←キー(37)
+    // ※丸の中の矢印と位置はダミー
+    window.addEventListener('keydown', e => {
+      if (!inProgress) return;
+      // 左キー=37, 右キー=39
+      if (e.keyCode !== 37 && e.keyCode !== 39) return;
+
+      const trial = trials[currentTrialIndex];
+      const endTime = performance.now();
+      const rt = endTime - startTime;
+
+      // 正解判定
+      let isCorrect = false;
+      if (trial.color === 'blue' && e.keyCode === 39) {
+        isCorrect = true;
+      } else if (trial.color === 'red' && e.keyCode === 37) {
+        isCorrect = true;
+      }
+
+      // 音声フィードバック
+      if (isCorrect) {
+        correctSound.currentTime = 0;
+        correctSound.play();
+      } else {
+        incorrectSound.currentTime = 0;
+        incorrectSound.play();
+      }
+
+      results.push({
+        color: trial.color,
+        arrowInside: trial.arrow,
+        position: trial.position,
+        correct: isCorrect,
+        rt: rt
+      });
+
+      inProgress = false;
+      taskArea.innerHTML = '';
+
+      currentTrialIndex++;
+      runNextTrial();
+    });
+
+    /***************************************************************
+     * 6. 全試行終了処理
+     ***************************************************************/
+    function endTask() {
+      taskArea.textContent = 'お疲れ様でした！';
+
+      // 集計
+      const n = results.length;
+      const correctCount = results.filter(r => r.correct).length;
+      const accuracy = (correctCount / n) * 100;
+
+      // 正答のみの平均RT
+      const correctTrials = results.filter(r => r.correct);
+      let meanRT = 0;
+      if (correctTrials.length > 0) {
+        meanRT = correctTrials.reduce((acc, cur) => acc + cur.rt, 0) / correctTrials.length;
+      }
+
+      infoArea.innerHTML = `
+        <p>試行数：${n}</p>
+        <p>正答率：${accuracy.toFixed(1)} %</p>
+        <p>平均反応時間（正答のみ）：${meanRT.toFixed(2)} ms</p>
+      `;
+
+      startBtn.disabled = false;
+      startBtn.textContent = 'もう一度';
+    }
+  </script>
+</body>
+</html>
